@@ -1,0 +1,8 @@
+node server.js
+
+Emvc14jqNj3bsrT2
+şifre
+
+https://cloud.mongodb.com/v2/6a0090f1e77a2d507dad0d98#/clusters
+https://account.mongodb.com/account/login
+

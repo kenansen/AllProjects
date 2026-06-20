@@ -1,0 +1,962 @@
+package com.example.customerchurnapp
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.example.customerchurnapp.ui.theme.CustomerChurnAppTheme
+import com.opencsv.CSVReader
+import java.io.InputStreamReader
+import kotlinx.coroutines.launch
+import retrofit2.Retrofit
+import retrofit2.converter.gson.GsonConverterFactory
+import retrofit2.http.Body
+import retrofit2.http.POST
+import com.google.gson.annotations.SerializedName
+
+// 🔹 API Base URL - Emulator için
+private const val BASE_URL = "http://10.0.2.2:5000/"
+
+// 🔹 API Request Model - YENİ PARAMETRELER EKLENDİ
+data class PredictionRequest(
+    @SerializedName("customerId") val customerId: String,
+    @SerializedName("stockCode") val stockCode: String,
+    @SerializedName("quantity") val quantity: String,
+    @SerializedName("price") val price: String,
+    @SerializedName("frequency") val frequency: String,
+
+    // API tarafından beklenen eksik RFM ve Ülke parametreleri:
+    @SerializedName("recency") val recency: String,         // Son alışverişten bu yana gün
+    @SerializedName("tenure") val tenure: String,           // Müşteri olma süresi (gün)
+    @SerializedName("numProducts") val numProducts: String, // Aldığı farklı ürün sayısı
+    @SerializedName("country") val country: String,         // Ülke adı
+
+    @SerializedName("model") val model: String
+)
+
+// 🔹 API Response Model
+data class PredictionResponse(
+    @SerializedName("success") val success: Boolean,
+    @SerializedName("churnProbability") val churnProbability: Double,
+    @SerializedName("model") val model: String,
+    @SerializedName("message") val message: String? = null,
+    @SerializedName("error") val error: String? = null
+)
+
+// 🔹 Retrofit API Interface
+interface ChurnApiService {
+    @POST("predict")
+    suspend fun predictChurn(@Body request: PredictionRequest): PredictionResponse
+}
+
+// 🔹 Retrofit Instance
+object RetrofitInstance {
+    private val retrofit by lazy {
+        Retrofit.Builder()
+            .baseUrl(BASE_URL)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+    }
+
+    val api: ChurnApiService by lazy {
+        retrofit.create(ChurnApiService::class.java)
+    }
+}
+
+// 🔹 Müşteri verisi data class
+data class CustomerRecord(
+    val id: String,
+    val name: String,
+    val tenure: String,
+    val contract: String,
+    val paymentMethod: String,
+    val monthlyCharges: String
+)
+
+// 🔹 Ekran enumları
+private enum class Screen {
+    MAIN_MENU,
+    ADD_NEW_RECORD,
+    DATASET_SELECTION,
+    MODEL_SELECTION,
+    CHURN_PREDICTION,
+    PREDICTION_RESULT,
+    RECORD_LIST
+}
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            CustomerChurnAppTheme {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    var currentScreen by remember { mutableStateOf(Screen.MAIN_MENU) }
+                    var selectedDataset by remember { mutableStateOf<String?>(null) }
+                    var selectedModel by remember { mutableStateOf<String?>(null) }
+                    var predictionResult by remember { mutableStateOf(0) }
+                    var customerRecords by remember { mutableStateOf(listOf<CustomerRecord>()) }
+                    var csvRecords by remember { mutableStateOf(listOf<CustomerRecord>()) }
+
+                    val context = LocalContext.current
+
+                    // 🔹 CSV dosyasını yükle (ilk açılışta)
+                    LaunchedEffect(Unit) {
+                        try {
+                            val inputStream = context.assets.open("customer_data.csv")
+                            val reader = CSVReader(InputStreamReader(inputStream))
+                            val allRows = reader.readAll()
+
+                            // İlk satır header ise atla
+                            val dataRows = allRows.drop(1)
+
+                            csvRecords = dataRows.mapIndexed { index, row ->
+                                CustomerRecord(
+                                    id = index.toString(),
+                                    name = row.getOrNull(0) ?: "",
+                                    tenure = row.getOrNull(1) ?: "",
+                                    contract = row.getOrNull(2) ?: "",
+                                    paymentMethod = row.getOrNull(3) ?: "",
+                                    monthlyCharges = row.getOrNull(4) ?: ""
+                                )
+                            }
+
+                            reader.close()
+                        } catch (e: Exception) {
+                            println("CSV yükleme hatası: ${e.message}")
+                        }
+                    }
+
+                    when (currentScreen) {
+                        Screen.MAIN_MENU -> {
+                            MainMenuScreen(
+                                onNewRecord = {
+                                    currentScreen = Screen.ADD_NEW_RECORD
+                                },
+                                onViewData = {
+                                    currentScreen = Screen.DATASET_SELECTION
+                                }
+                            )
+                        }
+
+                        Screen.ADD_NEW_RECORD -> {
+                            AddNewRecordScreen(
+                                onSave = { record ->
+                                    customerRecords = customerRecords + record
+                                    currentScreen = Screen.RECORD_LIST
+                                },
+                                onBack = {
+                                    currentScreen = Screen.MAIN_MENU
+                                }
+                            )
+                        }
+
+                        Screen.RECORD_LIST -> {
+                            RecordListScreen(
+                                records = customerRecords + csvRecords, // Manuel + CSV verileri birleşiyor
+                                onBack = {
+                                    currentScreen = Screen.MAIN_MENU
+                                }
+                            )
+                        }
+
+                        Screen.DATASET_SELECTION -> {
+                            DatasetSelectionScreen(
+                                onDatasetSelected = { datasetName ->
+                                    selectedDataset = datasetName
+                                },
+                                onNext = {
+                                    currentScreen = Screen.MODEL_SELECTION
+                                },
+                                onBack = {
+                                    currentScreen = Screen.MAIN_MENU
+                                }
+                            )
+                        }
+
+                        Screen.MODEL_SELECTION -> {
+                            ModelSelectionScreen(
+                                onModelSelected = { modelName ->
+                                    selectedModel = modelName
+                                    currentScreen = Screen.CHURN_PREDICTION
+                                },
+                                onBack = {
+                                    currentScreen = Screen.DATASET_SELECTION
+                                }
+                            )
+                        }
+
+                        Screen.CHURN_PREDICTION -> {
+                            ChurnPredictionScreen(
+                                selectedModel = selectedModel ?: "Random Forest",
+                                onPredictionResult = { probability ->
+                                    predictionResult = probability.toInt()
+                                    currentScreen = Screen.PREDICTION_RESULT
+                                },
+                                onBack = {
+                                    currentScreen = Screen.MODEL_SELECTION
+                                }
+                            )
+                        }
+
+                        Screen.PREDICTION_RESULT -> {
+                            PredictionResultScreen(
+                                churnProbability = predictionResult,
+                                selectedModel = selectedModel ?: "Unknown",
+                                onGoBack = {
+                                    currentScreen = Screen.MAIN_MENU
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun MainMenuScreen(onNewRecord: () -> Unit, onViewData: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 28.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "Churn Tracker",
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF123E63)
+        )
+
+        Spacer(modifier = Modifier.height(48.dp))
+
+        Button(
+            onClick = onNewRecord,
+            modifier = Modifier
+                .fillMaxWidth(0.7f)
+                .height(50.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7FB3D5))
+        ) {
+            Text(text = "Yeni Kayıt Ekle", fontSize = 16.sp, color = Color.White)
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
+
+        Button(
+            onClick = onViewData,
+            modifier = Modifier
+                .fillMaxWidth(0.7f)
+                .height(50.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7FB3D5))
+        ) {
+            Text(text = "Veri Listesini Gör", fontSize = 16.sp, color = Color.White)
+        }
+    }
+}
+
+@Composable
+fun AddNewRecordScreen(
+    onSave: (CustomerRecord) -> Unit,
+    onBack: () -> Unit
+) {
+    var customerName by remember { mutableStateOf("") }
+    var tenure by remember { mutableStateOf("") }
+    var contract by remember { mutableStateOf("") }
+    var paymentMethod by remember { mutableStateOf("") }
+    var monthlyCharges by remember { mutableStateOf("") }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 28.dp, vertical = 20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "Yeni Kayıt Ekle",
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF123E63)
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        OutlinedTextField(
+            value = customerName,
+            onValueChange = { customerName = it },
+            label = { Text("Müşteri Adı") },
+            modifier = Modifier.fillMaxWidth(),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Color(0xFF7FB3D5),
+                focusedLabelColor = Color(0xFF7FB3D5)
+            )
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        OutlinedTextField(
+            value = tenure,
+            onValueChange = { tenure = it },
+            label = { Text("Müşteri Süresi (Ay)") },
+            modifier = Modifier.fillMaxWidth(),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Color(0xFF7FB3D5),
+                focusedLabelColor = Color(0xFF7FB3D5)
+            )
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        OutlinedTextField(
+            value = contract,
+            onValueChange = { contract = it },
+            label = { Text("Sözleşme Tipi") },
+            modifier = Modifier.fillMaxWidth(),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Color(0xFF7FB3D5),
+                focusedLabelColor = Color(0xFF7FB3D5)
+            )
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        OutlinedTextField(
+            value = paymentMethod,
+            onValueChange = { paymentMethod = it },
+            label = { Text("Ödeme Yöntemi") },
+            modifier = Modifier.fillMaxWidth(),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Color(0xFF7FB3D5),
+                focusedLabelColor = Color(0xFF7FB3D5)
+            )
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        OutlinedTextField(
+            value = monthlyCharges,
+            onValueChange = { monthlyCharges = it },
+            label = { Text("Aylık Ücret") },
+            modifier = Modifier.fillMaxWidth(),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Color(0xFF7FB3D5),
+                focusedLabelColor = Color(0xFF7FB3D5)
+            )
+        )
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        Button(
+            onClick = {
+                if (customerName.isNotBlank()) {
+                    val newRecord = CustomerRecord(
+                        id = System.currentTimeMillis().toString(),
+                        name = customerName,
+                        tenure = tenure,
+                        contract = contract,
+                        paymentMethod = paymentMethod,
+                        monthlyCharges = monthlyCharges
+                    )
+                    onSave(newRecord)
+                }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF123E63))
+        ) {
+            Text("KAYDET", fontSize = 18.sp, color = Color.White)
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Button(
+            onClick = onBack,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color.LightGray)
+        ) {
+            Text("GERİ", fontSize = 16.sp, color = Color.Black)
+        }
+    }
+}
+
+@Composable
+fun RecordListScreen(
+    records: List<CustomerRecord>,
+    onBack: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 28.dp, vertical = 20.dp)
+    ) {
+        Text(
+            text = "Müşteri Kayıtları",
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF123E63),
+            modifier = Modifier.align(Alignment.CenterHorizontally)
+        )
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        if (records.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "Henüz kayıt yok",
+                    fontSize = 16.sp,
+                    color = Color.Gray
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(records) { record ->
+                    CustomerRecordCard(record)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Button(
+            onClick = onBack,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color.LightGray)
+        ) {
+            Text("GERİ", fontSize = 16.sp, color = Color.Black)
+        }
+    }
+}
+
+@Composable
+fun CustomerRecordCard(record: CustomerRecord) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5)),
+        elevation = CardDefaults.cardElevation(4.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Text(
+                text = record.name,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF123E63)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text("Müşteri Süresi: ${record.tenure} ay", fontSize = 14.sp, color = Color.Gray)
+            Text("Sözleşme: ${record.contract}", fontSize = 14.sp, color = Color.Gray)
+            Text("Ödeme: ${record.paymentMethod}", fontSize = 14.sp, color = Color.Gray)
+            Text("Aylık Ücret: ${record.monthlyCharges} TL", fontSize = 14.sp, color = Color.Gray)
+        }
+    }
+}
+
+@Composable
+fun DatasetSelectionScreen(
+    onDatasetSelected: (String) -> Unit,
+    onNext: () -> Unit,
+    onBack: () -> Unit
+) {
+    val optionColor = Color(0xFF7FB3D5)
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 28.dp, vertical = 20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Text(
+            text = "CUSTOMER CHURN\nPREDICTION",
+            fontSize = 26.sp,
+            fontWeight = FontWeight.ExtraBold,
+            color = Color(0xFF123E63),
+            lineHeight = 30.sp
+        )
+
+        Spacer(modifier = Modifier.height(28.dp))
+
+        Text(
+            text = "Dataset",
+            fontSize = 20.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = Color(0xFF2E4A5A)
+        )
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        Button(
+            onClick = {
+                onDatasetSelected("Kaggle Telco Customer Churn Dataset")
+            },
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .height(56.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = optionColor)
+        ) {
+            Text("Kaggle Telco Customer Churn Dataset", fontSize = 16.sp, color = Color.White)
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        Button(
+            onClick = {
+                onDatasetSelected("E-commerce Behavioral Data")
+                onNext()
+            },
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .height(56.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = optionColor)
+        ) {
+            Text("E-commerce Behavioral Data", fontSize = 16.sp, color = Color.White)
+        }
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        Button(
+            onClick = onBack,
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .height(56.dp),
+            shape = RoundedCornerShape(14.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color.LightGray)
+        ) {
+            Text("GERİ", fontSize = 16.sp, color = Color.Black)
+        }
+    }
+}
+
+@Composable
+fun ModelSelectionScreen(
+    onModelSelected: (String) -> Unit,
+    onBack: () -> Unit
+) {
+    val optionColor = Color(0xFF7FB3D5)
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 28.dp, vertical = 20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "Predict Customer Churn",
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF123E63)
+        )
+
+        Spacer(modifier = Modifier.height(28.dp))
+
+        ModelCard("Logistic Regression", optionColor) {
+            onModelSelected("Logistic Regression")
+        }
+
+        ModelCard("Decision Tree", optionColor) {
+            onModelSelected("Decision Tree")
+        }
+
+        ModelCard("Random Forest", optionColor) {
+            onModelSelected("Random Forest")
+        }
+
+        ModelCard("Support Vector Machine", optionColor) {
+            onModelSelected("Support Vector Machine")
+        }
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        Button(
+            onClick = onBack,
+            modifier = Modifier
+                .fillMaxWidth(0.5f)
+                .height(50.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color.LightGray)
+        ) {
+            Text("GERİ", color = Color.Black)
+        }
+    }
+}
+
+@Composable
+fun ModelCard(title: String, color: Color, onSelect: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(4.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(title, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = onSelect,
+                colors = ButtonDefaults.buttonColors(containerColor = color)
+            ) {
+                Text("Select", color = Color.White)
+            }
+        }
+    }
+}
+
+@Composable
+fun ChurnPredictionScreen(
+    selectedModel: String,
+    onPredictionResult: (Double) -> Unit,
+    onBack: () -> Unit
+) {
+    var customerId by remember { mutableStateOf("") }
+    var stockCode by remember { mutableStateOf("") }
+    var quantity by remember { mutableStateOf("") }
+    var price by remember { mutableStateOf("") }
+    var frequency by remember { mutableStateOf("") }
+
+    // YENİ EKLENEN STATE'LER
+    var recency by remember { mutableStateOf("") }
+    var tenure by remember { mutableStateOf("") }
+    var numProducts by remember { mutableStateOf("") }
+    var country by remember { mutableStateOf("") }
+
+
+    var isLoading by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    val scope = rememberCoroutineScope()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 28.dp, vertical = 20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "Churn Prediction",
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF123E63)
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Kaydırma için LazyColumn eklendi
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            item {
+                OutlinedTextField(
+                    value = customerId,
+                    onValueChange = { customerId = it },
+                    label = { Text("Müşteri ID") },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFF7FB3D5),
+                        focusedLabelColor = Color(0xFF7FB3D5)
+                    )
+                )
+            }
+
+            item {
+                OutlinedTextField(
+                    value = stockCode,
+                    onValueChange = { stockCode = it },
+                    label = { Text("Ürün Kodu") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFF7FB3D5),
+                        focusedLabelColor = Color(0xFF7FB3D5)
+                    )
+                )
+            }
+
+            item {
+                OutlinedTextField(
+                    value = quantity,
+                    onValueChange = { quantity = it.filter { it.isDigit() || it == '.' } },
+                    label = { Text("Miktar") },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFF7FB3D5),
+                        focusedLabelColor = Color(0xFF7FB3D5)
+                    )
+                )
+            }
+
+            item {
+                OutlinedTextField(
+                    value = price,
+                    onValueChange = { price = it.filter { it.isDigit() || it == '.' } },
+                    label = { Text("Birim Fiyat") },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFF7FB3D5),
+                        focusedLabelColor = Color(0xFF7FB3D5)
+                    )
+                )
+            }
+
+            item {
+                OutlinedTextField(
+                    value = frequency,
+                    onValueChange = { frequency = it.filter { it.isDigit() } },
+                    label = { Text("Alışveriş Sıklığı (Adet)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFF7FB3D5),
+                        focusedLabelColor = Color(0xFF7FB3D5)
+                    )
+                )
+            }
+
+            // YENİ RFM GİRİŞ ALANLARI
+            item {
+                OutlinedTextField(
+                    value = recency,
+                    onValueChange = { recency = it.filter { it.isDigit() } },
+                    label = { Text("Son Alışveriş (Gün)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFF7FB3D5),
+                        focusedLabelColor = Color(0xFF7FB3D5)
+                    )
+                )
+            }
+
+            item {
+                OutlinedTextField(
+                    value = tenure,
+                    onValueChange = { tenure = it.filter { it.isDigit() } },
+                    label = { Text("Müşteri Ömrü (Gün)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFF7FB3D5),
+                        focusedLabelColor = Color(0xFF7FB3D5)
+                    )
+                )
+            }
+
+            item {
+                OutlinedTextField(
+                    value = numProducts,
+                    onValueChange = { numProducts = it.filter { it.isDigit() } },
+                    label = { Text("Farklı Ürün Çeşit Sayısı") },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFF7FB3D5),
+                        focusedLabelColor = Color(0xFF7FB3D5)
+                    )
+                )
+            }
+
+            item {
+                OutlinedTextField(
+                    value = country,
+                    onValueChange = { country = it },
+                    label = { Text("Ülke (örn: United Kingdom)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFF7FB3D5),
+                        focusedLabelColor = Color(0xFF7FB3D5)
+                    )
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Hata mesajı
+        if (errorMessage != null) {
+            Text(
+                text = errorMessage!!,
+                color = Color.Red,
+                fontSize = 14.sp
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
+        Button(
+            onClick = {
+                // Temel doğrulama: Zorunlu alanların kontrolü
+                if (customerId.isNotBlank() && quantity.isNotBlank() && price.isNotBlank() && recency.isNotBlank() && tenure.isNotBlank()) {
+                    isLoading = true
+                    errorMessage = null
+
+                    scope.launch {
+                        try {
+                            val request = PredictionRequest(
+                                customerId = customerId,
+                                stockCode = stockCode.ifBlank { "0" }, // Boşsa varsayılan
+                                quantity = quantity,
+                                price = price,
+                                frequency = frequency.ifBlank { "1" }, // Boşsa varsayılan
+
+                                // YENİ PARAMETRELERİN GÖNDERİLMESİ
+                                recency = recency,
+                                tenure = tenure,
+                                numProducts = numProducts.ifBlank { "1" }, // Boşsa varsayılan
+                                country = country.ifBlank { "United Kingdom" }, // Boşsa varsayılan
+
+                                model = selectedModel
+                            )
+
+                            val response = RetrofitInstance.api.predictChurn(request)
+
+                            isLoading = false
+
+                            if (response.success) {
+                                onPredictionResult(response.churnProbability)
+                            } else {
+                                errorMessage = response.error ?: "Tahmin başarısız"
+                            }
+                        } catch (e: Exception) {
+                            isLoading = false
+                            errorMessage = "Bağlantı hatası: ${e.message}"
+                        }
+                    }
+                } else {
+                    errorMessage = "Lütfen gerekli tüm alanları doldurun."
+                }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF123E63)),
+            enabled = !isLoading
+        ) {
+            if (isLoading) {
+                CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp))
+            } else {
+                Text("SUBMIT", fontSize = 18.sp, color = Color.White)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Button(
+            onClick = onBack,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color.LightGray)
+        ) {
+            Text("GERİ", fontSize = 16.sp, color = Color.Black)
+        }
+    }
+}
+
+@Composable
+fun PredictionResultScreen(
+    churnProbability: Int,
+    selectedModel: String,
+    onGoBack: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 28.dp, vertical = 20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            text = "Prediction Result",
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF123E63)
+        )
+
+        Spacer(modifier = Modifier.height(40.dp))
+
+        Text(
+            text = "Bu müşterinin 3 ay içinde\nbu ürünü tekrar alma ihtimali:",
+            fontSize = 18.sp,
+            color = Color.Gray,
+            lineHeight = 26.sp
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Text(
+            text = "$churnProbability%",
+            fontSize = 72.sp,
+            fontWeight = FontWeight.ExtraBold,
+            color = Color(0xFF123E63)
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = selectedModel,
+            fontSize = 16.sp,
+            color = Color.Gray
+        )
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        Button(
+            onClick = onGoBack,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2196F3))
+        ) {
+            Text("GO BACK", fontSize = 18.sp, color = Color.White)
+        }
+    }
+}

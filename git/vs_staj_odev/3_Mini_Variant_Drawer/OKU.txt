@@ -1,0 +1,35 @@
+npm run dev  
+
+
+
+
+React - Mini Variant Drawer Application with MUI Components
+ 
+It is mandatory to use MUI as a component provider.
+MUI: The React component library you always wanted
+ 
+React Hook list to be used:
+useState
+useEffect
+useContext (very important for this homework)
+
+ 
+Things to pay attention:
+1- Writing clean code
+2- Atomic components architecture
+3- Documentation comments
+4- Modularity and reusability with MVC
+ 
+Npm Packages
+https://www.npmjs.com/package/@mui/material
+https://www.npmjs.com/package/react-router
+https://www.npmjs.com/package/react-router-dom
+ 
+
+
+MUI provides a simple, customizable, and accessible library of React components. Follow your own design system, or start with Material Design.
+ 
+material ui kullanıcaksın frontend'te , gördüğün dashboard benzeri bir dashboard ve diğer tablar olucak 
+ 
+todo app ve calculator'e de bakarız sonra 
+ 

@@ -1,0 +1,26 @@
+npm start
+--
+
+React Calculator Application
+ 
+Things to pay attention:
+1- Writing clean code
+2- Atomic components architecture
+3- Documentation comments
+4- Modularity and reusability with MVC
+ 
+ 
+ 
+The component provider you will use must be MaterialUI (MUI: The React component library you always wanted ).
+ 
+ 
+KenanSen_scint012026
+dosya dizisi oluşturdum içinde todo.controler.js model ve routes  gibi dosyalar var. bir de mongo dan hesap oluşturdum kullanıcı adı ve şifre aldım terminal ile bağlantı kuruyorum
+front end nasıl görünüyor ss atar mısın app i ayağa kaldırıp
+ 
+kaç ekranı varsa
+ 
+Erkan Perihan
+React Calculator Application   Things to pay attention: 1- Writing clean code 2- Atomic components architecture 3- Documentation comments 4- Modularity and reusability with MVC     📷   The component…
+bu taskta görünüm aynı bu şekilde olmak zorunda değil , ama burdaki hesaplama tuşalrı olmalı
+ 

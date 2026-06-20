@@ -1,0 +1,32 @@
+Playwright Assignment: E-Commerce Shopping Cart Test
+ 
+1. Overview
+In this assignment, interns will use Playwright to automate a test scenario on an e-commerce website (e.g., Trendyol, Hepsiburada, or Amazon). The goal is to simulate a user’s shopping experience, including category navigation, product filtering, adding items to the cart, and verifying cart functionality. This assignment will help interns improve their skills in web automation and validation.
+2. Objective
+Navigate to an e-commerce website and select a main category (e.g., Electronics).
+Randomly choose a subcategory and filter products by price range (10,000 TL - 15,000 TL).
+Add a product to the cart and verify its addition, price consistency, and cart behavior.
+Test advanced cart functionalities like quantity adjustments, coupon application, and item removal.
+3. Requirements
+3.1 Technical Requirements
+Tools: Node.js, Playwright, npm.
+Language: JavaScript.
+Target Platform: Any e-commerce website (e.g., Trendyol recommended for Turkish market).
+Output: Each step must log relevant information to the console (e.g., using console.log).
+3.2 Functional Requirements
+Website Navigation: Go to an e-commerce site and select a main category (e.g., "Electronics").
+Subcategory Selection: Randomly select a subcategory from the chosen main category and navigate to it.
+Price Filtering: Filter products in the subcategory to show items priced between 10,000 TL and 15,000 TL.
+Add to Cart: Add the first product from the filtered list to the cart.
+Cart Verification:
+Confirm the product was added to the cart.
+Compare the product’s price on the product page with the price in the cart.
+Verify the product name in the cart matches the added product.
+Shipping Cost Check: Check if there is a shipping fee in the cart.
+Cart Quantity Check:
+Record the number of items in the cart before and after adding the product.
+Test the "+" and "-" buttons to adjust quantity and verify they work correctly.
+Multiple Items: Add a second product and verify the total price calculation for two items.
+Coupon Functionality: Test the "Add Coupon" button with an invalid coupon code and report the result.
+Item Removal: Test the "Remove Item" button to ensure it deletes the product from the cart.
+Suggested Additional Feature: Measure and report the page load time for the cart page.

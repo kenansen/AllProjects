@@ -1,0 +1,144 @@
+"""
+Flask API - Müşteri Churn Prediction
+CSV'den model eğitip tahmin yapar
+"""
+
+from flask import Flask, request, jsonify
+import pandas as pd
+import numpy as np
+from datetime import datetime, timedelta
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.svm import SVC
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+import warnings
+warnings.filterwarnings('ignore')
+
+app = Flask(__name__)
+
+# Global değişkenler
+models = {}
+scaler = None
+feature_columns = []
+
+def load_and_train_models():
+    """CSV'yi yükle ve modelleri eğit"""
+    global models, scaler, feature_columns
+    
+    # CSV'yi yükle
+    df = pd.read_csv('customer_data.csv', encoding='latin-1')
+    
+    # Tarih formatını düzelt
+    df['InvoiceDate'] = pd.to_datetime(df['InvoiceDate'], format='%m/%d/%Y %H:%M')
+    
+    # Müşteri bazlı özellikler oluştur
+    customer_features = df.groupby(['CustomerID', 'StockCode']).agg({
+        'Quantity': 'sum',
+        'UnitPrice': 'mean',
+        'InvoiceNo': 'count',
+        'InvoiceDate': ['min', 'max']
+    }).reset_index()
+    
+    customer_features.columns = ['CustomerID', 'StockCode', 'TotalQuantity', 
+                                   'AvgPrice', 'PurchaseFrequency', 
+                                   'FirstPurchase', 'LastPurchase']
+    
+    # Son alışveriş tarihi
+    max_date = df['InvoiceDate'].max()
+    
+    # Recency (son alışverişten bu yana geçen gün)
+    customer_features['Recency'] = (max_date - customer_features['LastPurchase']).dt.days
+    
+    # Tenure (ilk alışverişten son alışverişe kadar geçen gün)
+    customer_features['Tenure'] = (customer_features['LastPurchase'] - 
+                                     customer_features['FirstPurchase']).dt.days
+    
+    # Monetary (toplam harcama)
+    customer_features['Monetary'] = customer_features['TotalQuantity'] * customer_features['AvgPrice']
+    
+    # Churn label: Son 90 günde alışveriş yapmadıysa churn=1
+    customer_features['Churn'] = (customer_features['Recency'] > 90).astype(int)
+    
+    # Özellik seçimi
+    feature_columns = ['TotalQuantity', 'AvgPrice', 'PurchaseFrequency', 
+                       'Recency', 'Tenure', 'Monetary']
+    
+    X = customer_features[feature_columns].fillna(0)
+    y = customer_features['Churn']
+    
+    # Normalizasyon
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    
+    # Train-test split
+    X_train, X_test, y_train, y_test = train_test_split(
+        X_scaled, y, test_size=0.2, random_state=42
+    )
+    
+    # Modelleri eğit
+    models['Random Forest'] = RandomForestClassifier(n_estimators=100, random_state=42)
+    models['Decision Tree'] = DecisionTreeClassifier(max_depth=5, random_state=42)
+    models['Logistic Regression'] = LogisticRegression(max_iter=1000, random_state=42)
+    models['Support Vector Machine'] = SVC(probability=True, random_state=42)
+    
+    for name, model in models.items():
+        model.fit(X_train, y_train)
+        score = model.score(X_test, y_test)
+        print(f"{name} accuracy: {score:.2f}")
+    
+    print("✅ Modeller eğitildi!")
+
+@app.route('/predict', methods=['POST'])
+def predict_churn():
+    """Churn tahmini yap"""
+    try:
+        data = request.json
+        
+        # Gelen veri
+        customer_id = data.get('customerId', 0)
+        stock_code = data.get('stockCode', '')
+        quantity = float(data.get('quantity', 1))
+        price = float(data.get('price', 10))
+        frequency = int(data.get('frequency', 1))
+        model_name = data.get('model', 'Random Forest')
+        
+        # Özellikler oluştur
+        recency = 30  # Varsayılan: 30 gün önce alışveriş
+        tenure = 180  # Varsayılan: 6 ay müşteri
+        monetary = quantity * price
+        
+        # Feature vector
+        features = np.array([[quantity, price, frequency, recency, tenure, monetary]])
+        features_scaled = scaler.transform(features)
+        
+        # Model seçimi
+        model = models.get(model_name, models['Random Forest'])
+        
+        # Tahmin
+        churn_prob = model.predict_proba(features_scaled)[0][1] * 100
+        
+        return jsonify({
+            'success': True,
+            'churnProbability': round(churn_prob, 2),
+            'model': model_name,
+            'message': f'{model_name} ile tahmin başarılı'
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    """API sağlık kontrolü"""
+    return jsonify({'status': 'OK', 'models_loaded': len(models)})
+
+if __name__ == '__main__':
+    print("🚀 Modeller yükleniyor...")
+    load_and_train_models()
+    print("🌐 Flask API başlatılıyor...")
+    app.run(host='0.0.0.0', port=5000, debug=True)
